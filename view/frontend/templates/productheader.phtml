@@ -30,29 +30,7 @@
     <script type="text/javascript">
         var bvChildren = <?php echo $this->getChildrenJson(); ?>;
         var bvSelected = "<?php echo $this->getProductSku() ?>";
-        require(["jquery", "jquery/ui", "swatchRenderer"], function ($) {
-
-            jQuery('.swatch-option').live("mouseout", function(){
-                var bvCurrent = '';
-                jQuery('.swatch-attribute').each(function(){
-                    bvCurrent = bvCurrent + jQuery(this).attr('attribute-id') + '_' + jQuery(this).attr('option-selected') + '_';
-                });
-                console.log(bvCurrent);
-                if (bvChildren[bvCurrent] != undefined && bvChildren[bvCurrent] != bvSelected) {
-                    console.log("switching to " + bvChildren[bvCurrent]);
-                    bvConfigData.productId = bvChildren[bvCurrent];
-                    $BV.configure("global", bvConfigData);
-                    $BV.ui( 'rr', 'show_reviews', {
-                        doShowContent : function () {
-                            <?php echo $this->getConfig('rr/do_show_content_js'); ?>
-                        }
-                    });
-                    bvSelected = bvChildren[bvCurrent];
-                }
-            });
-
-        });
     </script>
 <?php endif; ?>
-    
+
 <?php endif;
