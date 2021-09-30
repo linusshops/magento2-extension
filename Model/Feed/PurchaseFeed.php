@@ -14,9 +14,9 @@ use Bazaarvoice\Connector\Logger\Logger;
 use Bazaarvoice\Connector\Model\Source\Trigger;
 use Bazaarvoice\Connector\Model\XMLWriter;
 use Exception;
-use Magento\Catalog\Helper\Image;
 use Magento\Catalog\Model\Product;
 use Magento\Catalog\Model\Product\Attribute\Source\Status;
+use Magento\Catalog\Model\Product\Media\ConfigFactory;
 use Magento\ConfigurableProduct\Model\Product\Type;
 use Magento\Framework\App\Area;
 use Magento\Framework\App\ResourceConnection;
@@ -47,10 +47,6 @@ class PurchaseFeed extends Feed
      */
     private $state;
     /**
-     * @var \Magento\Catalog\Helper\Image
-     */
-    private $imageHelper;
-    /**
      * @var \Magento\Sales\Model\ResourceModel\Order\CollectionFactory
      */
     private $orderCollectionFactory;
@@ -62,6 +58,10 @@ class PurchaseFeed extends Feed
      * @var array
      */
     private $orderStatus;
+    /**
+     * @var \Magento\Catalog\Model\Product\Media\ConfigFactory
+     */
+    private $mediaConfigFactory;
 
     /**
      * Constructor
@@ -73,9 +73,10 @@ class PurchaseFeed extends Feed
      * @param \Bazaarvoice\Connector\Model\XMLWriter                     $xmlWriter
      * @param \Magento\Framework\Filesystem\Io\File                      $filesystem
      * @param \Magento\Framework\App\State                               $state
-     * @param \Magento\Catalog\Helper\Image                              $imageHelper
      * @param \Magento\Sales\Model\ResourceModel\Order\CollectionFactory $orderCollectionFactory
      * @param \Magento\Framework\App\ResourceConnection                  $resourceConnection
+     * @param \Magento\Catalog\Model\Product\Media\ConfigFactory         $mediaConfigFactory
+     * @param array                                                      $orderStatus
      *
      * @throws \Magento\Framework\Exception\LocalizedException
      */
@@ -87,9 +88,9 @@ class PurchaseFeed extends Feed
         XMLWriter $xmlWriter,
         File $filesystem,
         State $state,
-        Image $imageHelper,
         CollectionFactory $orderCollectionFactory,
         ResourceConnection $resourceConnection,
+        ConfigFactory $mediaConfigFactory,
         $orderStatus = []
     ) {
         try {
@@ -104,10 +105,10 @@ class PurchaseFeed extends Feed
         $this->xmlWriter = $xmlWriter;
         $this->filesystem = $filesystem;
         $this->state = $state;
-        $this->imageHelper = $imageHelper;
         $this->orderCollectionFactory = $orderCollectionFactory;
         $this->resourceConnection = $resourceConnection;
         $this->orderStatus = $orderStatus;
+        $this->mediaConfigFactory = $mediaConfigFactory;
     }
 
     /**
@@ -185,13 +186,13 @@ class PurchaseFeed extends Feed
                 $product = $item->getProduct();
                 /** Using store on the order, to handle website/group data */
                 $product->setStoreId($order->getStoreId());
+                $this->storeManager->setCurrentStore($order->getStoreId());
                 $product->load($product->getId());
 
                 $writer->writeElement('ExternalId', $this->stringFormatter->getFormattedProductSku($product));
                 $writer->writeElement('Name', $product->getName());
 
-                $imageUrl = $this->imageHelper->init($product, 'product_small_image')
-                    ->setImageFile($product->getSmallImage())->getUrl();
+                $imageUrl = $this->mediaConfigFactory->create()->getMediaUrl($product->getSmallImage());
                 $originalPrice = $item->getOriginalPrice();
 
                 if ($item->getParentItem()) {
@@ -206,8 +207,7 @@ class PurchaseFeed extends Feed
                             /** if product families are enabled and product has no image, use configurable image */
                             try {
                                 $parent = $parentItem->getProduct();
-                                $imageUrl = $this->imageHelper->init($parent, 'product_small_image')
-                                    ->setImageFile($parent->getSmallImage())->getUrl();
+                                $imageUrl = $this->mediaConfigFactory->create()->getMediaUrl($parent->getSmallImage());
                             } catch (Exception $e) {
                             }
                         }

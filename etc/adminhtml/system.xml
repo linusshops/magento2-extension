@@ -9,10 +9,14 @@
         <section id="bazaarvoice" translate="label" type="text" sortOrder="1800" showInDefault="1" showInWebsite="1" showInStore="1">
             <label>Bazaarvoice Connector</label>
             <tab>general</tab>
-            <!-- resource tag name which we have to defined in the acl.xml -->
+            <!-- resource tag name which we have defined in the acl.xml -->
             <resource>Bazaarvoice_Connector::config_bazaarvoice</resource>
             <group id="general" translate="label" type="text" sortOrder="100" showInDefault="1" showInWebsite="1" showInStore="1">
                 <label>General</label>
+                <field id="version" translate="label" type="label" sortOrder="1" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Bazaarvoice Extension Version</label>
+                    <backend_model>Bazaarvoice\Connector\Model\Config\Version</backend_model>
+                </field>
                 <field id="enable_bv" translate="label" type="select" sortOrder="1" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>Enable Bazaarvoice Extension</label>
                     <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
@@ -85,6 +89,7 @@
                 </field>
                 <field id="inline_ratings" translate="label" type="multiselect" sortOrder="30" showInDefault="1" showInStore="1" showInWebsite="1">
                     <label>Enable Hosted Inline Ratings</label>
+                    <can_be_empty>1</can_be_empty>
                     <source_model>Bazaarvoice\Connector\Model\Source\ProductList</source_model>
                     <comment><![CDATA[This places a simple 1-5 out of 5 star rating wherever products are found on the site. Choose which pages you’d like this functionality to be seen. See Documentation on defining where stars can be added across the site.]]></comment>
                 </field>
@@ -111,7 +116,7 @@
                 <field id="enable_product_feed" translate="label" type="select" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>Enable Product Feed</label>
                     <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
-                    <comment><![CDATA[Turn on Product Feed generation. This will enable generation of a product feed to be sent to the BV SFTP server. See documentation for additional steps to setup a scheduled job in Magento for this feature to take effect. Either this or DCC should be enabled, but not both. <strong>Product feed requires 'Catalog Flat Tables' to be enabled for Products and Categories.</strong>]]></comment>
+                    <comment><![CDATA[Turn on Product Feed generation. This will enable generation of a product feed to be sent to the BV SFTP server. See documentation for additional steps to setup a scheduled job in Magento for this feature to take effect. Either this or DCC should be enabled, but not both.]]></comment>
                 </field>
                 <field id="generation_scope" translate="label" type="select" sortOrder="20" showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>Feed Generation Scope</label>
@@ -138,24 +143,21 @@
                 <field id="sftp_username" translate="label" type="text" sortOrder="40" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>SFTP Username</label>
                     <comment><![CDATA[SFTP Connection Username. If this is left blank, the above Client Name will be used.]]></comment>
-                    <depends>
-                        <field id="enable_product_feed">1</field>
-                    </depends>
                 </field>
-                <field id="sftp_password" translate="label" type="password" sortOrder="50" showInDefault="1" showInWebsite="1" showInStore="1">
+                <field id="sftp_password" translate="label" type="obscure" sortOrder="50" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>SFTP Password</label>
-                    <comment><![CDATA[Password used to access the BV SFTP server for feed upload/download processes.]]></comment>
-                    <depends>
-                        <field id="enable_product_feed">1</field>
-                    </depends>
+                    <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
+                    <comment><![CDATA[Password used to access the BV SFTP server for feed upload/download processes. <strong>Note: this field is encrypted in v8.3.0+. If you recently upgraded and are experiencing connectivity issues, please try re-entering your password.</strong>]]></comment>
                 </field>
                 <field id="sftp_host_name" translate="label" type="select" sortOrder="100" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>SFTP Host Name</label>
                     <source_model>Bazaarvoice\Connector\Model\Source\SftpHost</source_model>
                     <comment><![CDATA[SFTP Connection Host. ]]></comment>
-                    <depends>
-                        <field id="enable_product_feed">1</field>
-                    </depends>
+                </field>
+                <field id="bv_sftp_test_connect_wizard" type="button" translate="button_label" sortOrder="101" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label/>
+                    <button_label>Test Connection</button_label>
+                    <frontend_model>Bazaarvoice\Connector\Block\Adminhtml\System\Config\Sftp\TestConnection</frontend_model>
                 </field>
                 <field id="product_filename" translate="label" type="text" sortOrder="110" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>Product Feed Filename</label>
@@ -205,6 +207,7 @@
                 </field>
                 <field id="bvfamilies_code" translate="label" type="multiselect" sortOrder="173" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label>Family Attributes</label>
+                    <can_be_empty>1</can_be_empty>
                     <source_model>Bazaarvoice\Connector\Model\Source\ProductAttribute</source_model>
                     <comment><![CDATA[If set, these attribute code(s) will be used in addition to the configurable product SKU to populate family data. <strong>Attribute must be set to 'Use in Product Listing' to display.</strong>]]></comment>
                 </field>
@@ -228,8 +231,17 @@
                 </field>
                 <field id="run_product" translate="button_label" type="button" sortOrder="190" showInDefault="1" showInWebsite="1" showInStore="1">
                     <label/>
-                    <button_label><![CDATA[Run Bazaarvoice Product Feed Now]]></button_label>
+                    <button_label><![CDATA[Run Enabled Bazaarvoice Product Feeds Now]]></button_label>
                     <button_url>*/bvfeed/runproduct</button_url>
+                    <frontend_model>Bazaarvoice\Connector\Block\System\Config\Button</frontend_model>
+                    <depends>
+                        <field id="enable_product_feed">1</field>
+                    </depends>
+                </field>
+                <field id="run_product_force" translate="button_label" type="button" sortOrder="190" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label/>
+                    <button_label><![CDATA[Force Run All Bazaarvoice Product Feeds Now]]></button_label>
+                    <button_url>*/bvfeed/runproduct/force/1</button_url>
                     <frontend_model>Bazaarvoice\Connector\Block\System\Config\Button</frontend_model>
                     <depends>
                         <field id="enable_product_feed">1</field>
@@ -260,7 +272,7 @@
                     <button_label><![CDATA[Run Bazaarvoice Purchase Feed Now]]></button_label>
                     <button_url>*/bvfeed/runpurchase</button_url>
                     <frontend_model>Bazaarvoice\Connector\Block\System\Config\Button</frontend_model>
-                    <comment><![CDATA[<strong>WARNING Do not run in production until emails have been tested.</strong>]]></comment>
+                    <comment><![CDATA[<strong>WARNING Do not run in production until emails have been tested.</strong>]]></comment>
                     <depends>
                         <field id="enable_purchase_feed">1</field>
                     </depends>

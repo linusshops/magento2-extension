@@ -16,8 +16,9 @@ use Bazaarvoice\Connector\Api\Data\Dcc\CatalogData\CatalogProductInterface;
 use Bazaarvoice\Connector\Api\Data\Dcc\CatalogData\CatalogProductInterfaceFactory;
 use Bazaarvoice\Connector\Api\StringFormatterInterface;
 use Magento\Catalog\Api\Data\ProductInterface;
-use Magento\Catalog\Helper\ImageFactory;
+use Magento\Catalog\Helper\Category;
 use Magento\Catalog\Model\CategoryRepository;
+use Magento\Catalog\Model\Product\Media\ConfigFactory;
 use Magento\ConfigurableProduct\Model\Product\Type\Configurable;
 use Magento\Framework\Escaper;
 use Magento\Framework\Exception\NoSuchEntityException;
@@ -57,10 +58,6 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
      */
     private $stringFormatter;
     /**
-     * @var \Magento\Catalog\Helper\ImageFactory
-     */
-    private $imageHelperFactory;
-    /**
      * @var \Bazaarvoice\Connector\Api\Data\Dcc\CatalogData\CatalogProduct\CategoryPathBuilderInterface
      */
     private $dccCategoryPathBuilder;
@@ -68,6 +65,14 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
      * @var \Bazaarvoice\Connector\Api\Data\Dcc\CatalogData\CatalogProduct\FamilyBuilderInterface
      */
     private $dccFamilyBuilder;
+    /**
+     * @var \Magento\Catalog\Model\Product\Media\ConfigFactory
+     */
+    private $mediaConfigFactory;
+    /**
+     * @var \Magento\Catalog\Helper\Category
+     */
+    private $categoryHelper;
 
     /**
      * CatalogDataBuilder constructor.
@@ -77,9 +82,10 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
      * @param \Magento\Catalog\Model\CategoryRepository                                                   $categoryRepository
      * @param \Magento\Framework\Escaper                                                                  $escaper
      * @param \Bazaarvoice\Connector\Api\Data\Dcc\CatalogData\CatalogProductInterfaceFactory              $dccCatalogProductFactory
-     * @param \Magento\Catalog\Helper\ImageFactory                                                        $imageHelperFactory
      * @param \Bazaarvoice\Connector\Api\Data\Dcc\CatalogData\CatalogProduct\CategoryPathBuilderInterface $dccCategoryPathBuilder
      * @param \Bazaarvoice\Connector\Api\Data\Dcc\CatalogData\CatalogProduct\FamilyBuilderInterface       $dccFamilyBuilder
+     * @param \Magento\Catalog\Model\Product\Media\ConfigFactory                                          $mediaConfigFactory
+     * @param \Magento\Catalog\Helper\Category                                                            $categoryHelper
      */
     public function __construct(
         ConfigProviderInterface $configProvider,
@@ -87,18 +93,20 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
         CategoryRepository $categoryRepository,
         Escaper $escaper,
         CatalogProductInterfaceFactory $dccCatalogProductFactory,
-        ImageFactory $imageHelperFactory,
         CategoryPathBuilderInterface $dccCategoryPathBuilder,
-        FamilyBuilderInterface $dccFamilyBuilder
+        FamilyBuilderInterface $dccFamilyBuilder,
+        ConfigFactory $mediaConfigFactory,
+        Category $categoryHelper
     ) {
         $this->categoryRepository = $categoryRepository;
         $this->escaper = $escaper;
         $this->dccCatalogProductFactory = $dccCatalogProductFactory;
         $this->configProvider = $configProvider;
         $this->stringFormatter = $stringFormatter;
-        $this->imageHelperFactory = $imageHelperFactory;
         $this->dccCategoryPathBuilder = $dccCategoryPathBuilder;
         $this->dccFamilyBuilder = $dccFamilyBuilder;
+        $this->mediaConfigFactory = $mediaConfigFactory;
+        $this->categoryHelper = $categoryHelper;
     }
 
     /**
@@ -124,6 +132,7 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
         $dccCatalogProduct->setIsbns($this->getCustomAttributeData($product, static::ISBN));
         $dccCatalogProduct->setModelNumbers($this->getCustomAttributeData($product, static::MODEL_NUMBER));
         $dccCatalogProduct->setFamilies($this->getFamilies($product, $parentProduct));
+        $dccCatalogProduct->setInactive(false);
 
         return $dccCatalogProduct;
     }
@@ -137,27 +146,36 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
     {
         if ($product->getData('bv_category_external_id')) {
             $categoryId = $product->getData('bv_category_external_id');
+            if ($categoryId) {
+                $category = $this->categoryRepository->get($categoryId, $product->getStoreId());
+            }
         } else {
-            $categoryIds = $product->getCategoryIds();
             /**
-             * Have to use only one category, because BV can only handle a category structure in which each
-             * category is a child of the previous category. BV cannot handle a tree structure. We choose the
-             * highest ID category in the hopes that it will be a leaf node.
+             * There is no BV category configured, and BV can only handle a category structure in which each category is
+             * a child of the previous category. BV cannot handle a tree structure. So unfortunately we now have to
+             * choose one category from the categories the product is in, for this store. We can't always use
+             * product->getCategory because that is not set if the user navigated directly to the product URL or from a
+             * search page. So we can't even use product->getCategory conditionally because then the output of DCC would
+             * change based on customer behavior.
              */
-            $categoryId = end($categoryIds);
+            $storeCategories = $this->categoryHelper->getStoreCategories(true, true, false);
+            $storeCategories->addIdFilter($product->getCategoryIds());
+            $storeCategories->unshiftOrder('level');
+            $category = $storeCategories->getFirstItem();
         }
 
         $categoryPaths = [];
-        if ($categoryId) {
+        if (isset($category)) {
             try {
-                $category = $this->categoryRepository->get($categoryId, $product->getStoreId());
                 $categoryTree = $category->getPath();
-                $categoryTree = explode('/', $categoryTree);
-                array_shift($categoryTree);
-                foreach ($categoryTree as $key => $treeId) {
-                    $parentCategory = $this->categoryRepository->get($treeId, $product->getStoreId());
-                    $dccCategoryPath = $this->dccCategoryPathBuilder->build($parentCategory);
-                    $categoryPaths[] = $this->prepareOutput($dccCategoryPath);
+                if ($categoryTree) {
+                    $categoryTree = explode('/', $categoryTree);
+                    array_shift($categoryTree);
+                    foreach ($categoryTree as $key => $treeId) {
+                        $parentCategory = $this->categoryRepository->get($treeId, $product->getStoreId());
+                        $dccCategoryPath = $this->dccCategoryPathBuilder->build($parentCategory);
+                        $categoryPaths[] = $this->prepareOutput($dccCategoryPath);
+                    }
                 }
                 //phpcs:ignore
             } catch (NoSuchEntityException $e) {
@@ -203,7 +221,7 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
 
     /**
      * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product $product
-     * @param $attributeCode
+     * @param                                                                           $attributeCode
      *
      * @return mixed
      */
@@ -229,9 +247,11 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
         if ($product->getTypeId() == Configurable::TYPE_CODE
             && $this->configProvider->isFamiliesInheritEnabled($product->getStoreId())
         ) {
-            $childProducts = $product->getTypeInstance()->getUsedProducts($product, [static::EAN, static::ISBN, static::UPC, static::MPN]);
+            $childProducts = $product->getTypeInstance()
+                ->getUsedProducts($product, [static::EAN, static::ISBN, static::UPC, static::MPN]);
             foreach ($childProducts as $childProduct) {
-                $value = array_merge((array) $value, (array) $this->getCustomAttributeData($childProduct, $attributeCode));
+                $value = array_merge((array)$value,
+                    (array)$this->getCustomAttributeData($childProduct, $attributeCode));
             }
         }
 
@@ -239,24 +259,26 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
     }
 
     /**
-     * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product $product
+     * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product      $product
      * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product|null $parentProduct
      *
      * @return string
      */
     private function getProductImageUrl($product, $parentProduct = null)
     {
-        if ($parentProduct && $parentProduct->getData('small_image')) {
-            $productToUse = $parentProduct;
+        if ($product && $product->getData('small_image')) {
+            $imageUrl = $this->mediaConfigFactory->create()->getMediaUrl($product->getSmallImage());
+        } else if ($parentProduct && $parentProduct->getData('small_image')) {
+            $imageUrl = $this->mediaConfigFactory->create()->getMediaUrl($parentProduct->getSmallImage());
         } else {
-            $productToUse = $product;
+            $imageUrl = $this->mediaConfigFactory->create()->getMediaUrl($product->getSmallImage());
         }
-        $imageUrl = $this->imageHelperFactory->create()->init($productToUse, static::PRODUCT_SMALL_IMAGE)->getUrl();
+
         return $this->escaper->escapeUrl($imageUrl);
     }
 
     /**
-     * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product $product
+     * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product      $product
      * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product|null $parentProduct
      *
      * @return string
@@ -268,7 +290,7 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
     }
 
     /**
-     * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product $product
+     * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product      $product
      * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product|null $parentProduct
      *
      * @return string|null
@@ -287,7 +309,7 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
     }
 
     /**
-     * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product $product
+     * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product      $product
      * @param \Magento\Catalog\Api\Data\ProductInterface|\Magento\Catalog\Model\Product|null $parentProduct
      *
      * @return string|null
@@ -337,6 +359,7 @@ class CatalogProductBuilder implements CatalogProductBuilderInterface
         if ($this->configProvider->isProductPrefixEnabled($product->getStoreId())) {
             $prefix = $this->configProvider->getPrefix($product->getStoreId());
         }
-        return $prefix . $this->stringFormatter->getFormattedProductSku($product);
+
+        return $prefix.$this->stringFormatter->getFormattedProductSku($product);
     }
 }

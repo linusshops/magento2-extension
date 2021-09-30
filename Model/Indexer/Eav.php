@@ -4,6 +4,7 @@
  * See LICENSE.md for license details.
  */
 
+/** @noinspection DuplicatedCode */
 declare(strict_types=1);
 
 namespace Bazaarvoice\Connector\Model\Indexer;
@@ -23,8 +24,7 @@ use Magento\Catalog\Helper\Image;
 use Magento\Catalog\Model\Product\Attribute\Source\Status;
 use Magento\Catalog\Model\Product\Visibility;
 use Magento\ConfigurableProduct\Model\Product\Type\Configurable;
-use Magento\Framework\App\Config\ScopeConfigInterface;
-use Magento\Framework\App\ProductMetadata;
+use Magento\Eav\Model\Config;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Select;
 use Magento\Framework\Exception\CouldNotSaveException;
@@ -36,14 +36,9 @@ use Magento\Framework\ObjectManagerInterface;
 use Magento\Framework\UrlInterface;
 use Magento\Store\Model\Store;
 use Magento\Store\Model\StoreManagerInterface;
+use Zend_Db_Expr;
 
-/**
- * Class Flat
- *
- * @deprecated Disable Magento flat tables so that this module uses its EAV indexer instead. Support for flat tables
- *             is deprecated by Magento and in this module.
- */
-class Flat implements IndexerActionInterface, MviewActionInterface
+class Eav implements IndexerActionInterface, MviewActionInterface
 {
     /**
      * @var \Bazaarvoice\Connector\Logger\Logger
@@ -70,17 +65,9 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      */
     private $resourceConnection;
     /**
-     * @var \Magento\Framework\App\Config\ScopeConfigInterface
-     */
-    private $scopeConfig;
-    /**
      * @var string
      */
     private $productIdField;
-    /**
-     * @var
-     */
-    private $mageVersion;
     /**
      * @var \Bazaarvoice\Connector\Api\Data\IndexInterfaceFactory
      */
@@ -101,10 +88,12 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      * @var StringFormatterInterface
      */
     private $stringFormatter;
+    /**
+     * @var \Magento\Eav\Model\Config
+     */
+    private $eavConfig;
 
     /**
-     * Flat constructor.
-     *
      * @param \Bazaarvoice\Connector\Logger\Logger                               $logger
      * @param \Bazaarvoice\Connector\Api\ConfigProviderInterface                 $configProvider
      * @param \Bazaarvoice\Connector\Api\StringFormatterInterface                $stringFormatter
@@ -113,10 +102,9 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      * @param \Magento\Store\Model\StoreManagerInterface                         $storeManager
      * @param \Bazaarvoice\Connector\Model\ResourceModel\Index\CollectionFactory $collectionFactory
      * @param \Magento\Framework\App\ResourceConnection                          $resourceConnection
-     * @param \Magento\Framework\App\Config\ScopeConfigInterface                 $scopeConfig
-     * @param \Magento\Framework\App\ProductMetadata                             $productMetadata
      * @param \Bazaarvoice\Connector\Api\Data\IndexInterfaceFactory              $bvIndexFactory
      * @param \Bazaarvoice\Connector\Api\IndexRepositoryInterface                $indexRepository
+     * @param \Magento\Eav\Model\Config                                          $eavConfig
      */
     public function __construct(
         Logger $logger,
@@ -127,10 +115,9 @@ class Flat implements IndexerActionInterface, MviewActionInterface
         StoreManagerInterface $storeManager,
         CollectionFactory $collectionFactory,
         ResourceConnection $resourceConnection,
-        ScopeConfigInterface $scopeConfig,
-        ProductMetadata $productMetadata,
         IndexInterfaceFactory $bvIndexFactory,
-        IndexRepositoryInterface $indexRepository
+        IndexRepositoryInterface $indexRepository,
+        Config $eavConfig
     ) {
         $this->logger = $logger;
         $this->storeManager = $storeManager;
@@ -138,39 +125,25 @@ class Flat implements IndexerActionInterface, MviewActionInterface
         $this->indexer = $indexerInterface->load('bazaarvoice_product');
         $this->bvIndexCollectionFactory = $collectionFactory;
         $this->resourceConnection = $resourceConnection;
-        $this->scopeConfig = $scopeConfig;
         $this->productIdField = $this->getProductIdFieldName();
-        $this->mageVersion = $productMetadata->getVersion();
         $this->bvIndexFactory = $bvIndexFactory;
         $this->indexRepository = $indexRepository;
         $this->configProvider = $configProvider;
         $this->stringFormatter = $stringFormatter;
+        $this->eavConfig = $eavConfig;
     }
 
     /**
-     * Check if flat tables are enabled
-     *
      * @return bool
      */
-    public function canIndex()
+    public function canIndex(): bool
     {
-        if (!$this->configProvider->canSendProductFeedInAnyScope()) {
-            return false;
-        }
-
-        if (!$this->scopeConfig->getValue('catalog/frontend/flat_catalog_product')
-            || !$this->scopeConfig->getValue('catalog/frontend/flat_catalog_category')) {
-            $this->logger->error('Bazaarvoice Product XML Feed requires Catalog Flat Tables to be enabled. Please check your Store Config.');
-
-            return false;
-        }
-
-        return true;
+        return $this->configProvider->canSendProductFeedInAnyScope();
     }
 
     /**
      * @return mixed
-     * @throws \Exception
+     * @throws \Zend_Db_Statement_Exception
      */
     public function executeFull()
     {
@@ -190,7 +163,7 @@ class Flat implements IndexerActionInterface, MviewActionInterface
                 $this->flushIndex();
                 $this->logger->debug(__('Bazaarvoice Product Feed Index has been flushed for rebuild.'));
             }
-            $this->logger->debug(__('Bazaarvoice Product Feed Index is being rebuilt.'));
+            $this->logger->debug(__('Bazaarvoice Product Feed Index is being rebuilt via cron.'));
             $this->execute();
         } catch (Exception $e) {
             $this->logger->err($e->getMessage()."\n".$e->getTraceAsString());
@@ -203,7 +176,6 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      * Update a batch of index rows
      *
      * @param \int[] $ids
-     *
      * @return mixed
      * @throws \Exception
      */
@@ -268,24 +240,18 @@ class Flat implements IndexerActionInterface, MviewActionInterface
     }
 
     /**
-     * Get index data using flat tables
-     *
      * @param array $productIds
      *
      * @throws \Exception
      */
-    protected function reindexProducts($productIds)
+    protected function reindexProducts(array $productIds)
     {
         switch ($this->configProvider->getFeedGenerationScope()) {
             case Scope::SCOPE_GLOBAL:
-                $stores = $this->storeManager->getStores();
-                ksort($stores);
-                /** @var \Magento\Store\Model\Store $store */
-                foreach ($stores as $store) {
-                    if ($this->configProvider->canSendProductFeed($store->getId())) {
-                        $this->reindexProductsForStore($productIds, $store);
-                        break;
-                    }
+                $store = $this->storeManager->getStore(Store::DEFAULT_STORE_ID);
+                if ($this->configProvider->canSendProductFeed($store->getId())) {
+                    $this->reindexProductsForStore($productIds, $store);
+                    break;
                 }
                 break;
             case Scope::WEBSITE:
@@ -363,23 +329,21 @@ class Flat implements IndexerActionInterface, MviewActionInterface
         $writeAdapter->query("UPDATE `$mviewTable` SET `version_id` = NULL, `status` = 'idle' WHERE `view_id` = 'bazaarvoice_product';");
         $indexCheck = $writeAdapter
             ->query("SELECT COUNT(1) indexIsThere FROM INFORMATION_SCHEMA.STATISTICS
-                    WHERE table_schema=DATABASE() AND table_name='{$changelogTable}' AND index_name='entity_id';");
+                    WHERE table_schema=DATABASE() AND table_name='$changelogTable' AND index_name='entity_id';");
         $indexCheck = $indexCheck->fetchObject();
         if ($indexCheck->indexIsThere == 0) {
-            $writeAdapter->query("ALTER TABLE `{$changelogTable}` ADD INDEX (`entity_id`);");
+            $writeAdapter->query("ALTER TABLE `$changelogTable` ADD INDEX (`entity_id`);");
         }
     }
 
     /**
-     * Mass update process, uses flat tables.
-     *
      * @param array     $productIds
      * @param int|Store $store
      *
      * @return bool
      * @throws \Exception
      */
-    public function reindexProductsForStore($productIds, $store)
+    public function reindexProductsForStore(array $productIds, $store): bool
     {
         $this->productIndexes = [];
         $this->populateIndexStoreData($productIds, $store);
@@ -393,136 +357,98 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      * @param       $productIds
      * @param Store $store
      *
-     * @throws \Zend_Db_Statement_Exception
+     * @throws \Magento\Framework\Exception\LocalizedException
+     * @throws \Zend_Db_Select_Exception
+     * @throws \Exception
      * @throws \Exception
      */
-    private function populateIndexStoreData($productIds, $store)
+    private function populateIndexStoreData($productIds, Store $store)
     {
         $storeId = $store->getId();
-
-        /** Database Resources */
         $res = $this->resourceConnection;
         $read = $res->getConnection('core_read');
-        $select = $this->getBaseSelect($read, $storeId, $res);
+        $select = $this->getBaseSelect($read, $store, $res);
         $this->joinParent($select, $storeId, $res);
 
         if ($this->configProvider->getFeedGenerationScope() == Scope::SCOPE_GLOBAL) {
             $cppTable = $res->getTableName('catalog_category_product');
         } else {
-            $cppTable = $res->getTableName("catalog_category_product_index_store{$storeId}");
+            $cppTable = $res->getTableName("catalog_category_product_index_store$storeId");
         }
-
-        if (version_compare($this->mageVersion, '2.2.5', '<')) {
-            $select
-                ->joinLeft(
-                    ['cp' => $res->getTableName('catalog_category_product_index')],
-                    "cp.product_id = p.entity_id AND cp.store_id = {$storeId}",
-                    'category_id'
-                )
-                ->joinLeft(
-                    ['cpp' => $res->getTableName('catalog_category_product_index')],
-                    "cpp.product_id = parent.entity_id AND cpp.store_id = {$storeId}",
-                    'category_id'
-                );
-        } else {
-            $select
-                ->joinLeft(
-                    ['cp' => $cppTable],
-                    "cp.product_id = p.entity_id",
-                    "category_id"
-                )
-                ->joinLeft(
-                    ['cpp' => $cppTable],
-                    "cpp.product_id = parent.entity_id",
-                    "category_id"
-                );
-        }
+        $select->joinLeft(['cp' => $cppTable], 'cp.product_id = p.entity_id', 'category_id')
+            ->joinLeft(['cpp' => $cppTable], 'cpp.product_id = parent.entity_id', 'category_id');
         $this->joinUrlRewrite($select, $storeId, $res);
+        $this->addFieldToJoin($select, 'bv_category_id', $storeId);
+        $bvCategoryId = $this->addFieldToSelect($select, 'bv_category_id', 'bv_category_id');
+        $this->addFieldToJoin($select, 'bv_category_id', $storeId, 'parent');
+        $parentBvCategoryId = $this->addFieldToSelect($select, 'bv_category_id', 'bv_category_id', 'parent');
+        $categoryTable = $res->getTableName('catalog_category_entity');
 
-        /** category */
         if ($this->configProvider->isCategoryIdUseUrlPathEnabled($storeId)) {
-            $select->joinLeft(
-                ['cat' => $res->getTableName('catalog_category_flat').'_store_'.$storeId],
-                'cat.entity_id = cp.category_id AND cat.level > 1',
-                ['category_external_id' => 'max(cat.url_path)']
+            $select->joinLeft(['c' => $categoryTable], 'c.entity_id = cp.category_id AND c.level > 1', []);
+            $attribute = $this->eavConfig->getAttribute('catalog_category', 'url_path');
+            $aliasTableName = 'ct'.$attribute->getId();
+            $storeAliasTableName = 'sct'.$attribute->getId();
+            $this->addFieldToJoin($select, 'url_path', $storeId, 'c', 'catalog_category');
+            $columnValue = $this->resourceConnection->getConnection()->getIfNullSql(
+                $storeAliasTableName . '.value',
+                $aliasTableName . '.value'
             );
-            $select->joinLeft(
-                ['parent_cat' => $res->getTableName('catalog_category_flat').'_store_'.$storeId],
-                'parent_cat.entity_id = cpp.category_id AND parent_cat.level > 1',
-                ['parent_category_external_id' => 'max(parent_cat.url_path)']
+            $select->columns(['category_external_id' => "max($columnValue)"]);
+
+            $select->joinLeft(['pc' => $categoryTable], 'pc.entity_id = cpp.category_id AND pc.level > 1', []);
+            $aliasTableName = 'pct'.$attribute->getId();
+            $storeAliasTableName = 'spct'.$attribute->getId();
+            $this->addFieldToJoin($select, 'url_path', $storeId, 'pc', 'catalog_category');
+            $columnValue = $this->resourceConnection->getConnection()->getIfNullSql(
+                $storeAliasTableName . '.value',
+                $aliasTableName . '.value'
             );
-            $select->joinLeft(
-                ['bv_cat' => $res->getTableName('catalog_category_flat').'_store_'.$storeId],
-                'bv_cat.entity_id = p.bv_category_id',
-                ['bv_category_external_id' => 'bv_cat.url_path']
-            );
-            $select->joinLeft(
-                ['bv_parent_cat' => $res->getTableName('catalog_category_flat').'_store_'.$storeId],
-                'bv_parent_cat.entity_id = parent.bv_category_id',
-                ['bv_parent_category_external_id' => 'bv_parent_cat.url_path']
-            );
+            $select->columns(['parent_category_external_id' => "max($columnValue)"]);
+
+            $select->joinLeft(['bvc' => $categoryTable], "bvc.entity_id = $bvCategoryId", []);
+            $this->addFieldToJoin($select, 'url_path', $storeId, 'bvc', 'catalog_category');
+            $this->addFieldToSelect($select, 'bv_category_external_id', 'url_path', 'bvc', 'catalog_category');
+
+            $select->joinLeft(['bvpc' => $categoryTable], "bvpc.entity_id = $parentBvCategoryId", []);
+            $this->addFieldToJoin($select, 'url_path', $storeId, 'bvpc', 'catalog_category');
+            $this->addFieldToSelect($select, 'bv_parent_category_external_id', 'url_path', 'bvpc', 'catalog_category');
         } else {
             $select->joinLeft(
-                ['cat' => $res->getTableName('catalog_category_entity')],
-                'cat.entity_id = cp.category_id AND cat.level > 1',
-                ['category_external_id' => 'max(cat.entity_id)']
+                ['c' => $categoryTable],
+                'c.entity_id = cp.category_id AND c.level > 1',
+                ['category_external_id' => 'max(c.entity_id)']
             );
             $select->joinLeft(
-                ['parent_cat' => $res->getTableName('catalog_category_entity')],
-                'parent_cat.entity_id = cpp.category_id AND parent_cat.level > 1',
-                ['parent_category_external_id' => 'max(parent_cat.entity_id)']
+                ['pc' => $categoryTable],
+                'pc.entity_id = cpp.category_id AND pc.level > 1',
+                ['parent_category_external_id' => 'max(pc.entity_id)']
             );
             $select->joinLeft(
-                ['bv_cat' => $res->getTableName('catalog_category_entity')],
-                'bv_cat.entity_id = p.bv_category_id',
-                ['bv_category_external_id' => 'bv_cat.entity_id']
+                ['bvc' => $categoryTable],
+                "bvc.entity_id = $bvCategoryId",
+                ['bv_category_external_id' => 'bvc.entity_id']
             );
             $select->joinLeft(
-                ['bv_parent_cat' => $res->getTableName('catalog_category_entity')],
-                'bv_parent_cat.entity_id = parent.bv_category_id',
-                ['bv_parent_category_external_id' => 'bv_parent_cat.entity_id']
+                ['bvpc' => $categoryTable],
+                "bvpc.entity_id = $parentBvCategoryId",
+                ['bv_parent_category_external_id' => 'bvpc.entity_id']
             );
         }
 
-        /** Brands and other Attributes */
-        $columnResults = $read->query('DESCRIBE `'.$res->getTableName('catalog_product_flat').'_'.$storeId.'`;');
-        $flatColumns = [];
-        while ($row = $columnResults->fetch()) {
-            $flatColumns[] = $row['Field'];
-        }
         $brandAttr = $this->configProvider->getAttributeCode('brand', $storeId);
         if ($brandAttr) {
-            if (in_array($brandAttr, $flatColumns)) {
-                $select->columns(['brand_external_id' => $brandAttr]);
-            }
+            $this->addFieldToJoin($select, $brandAttr, $storeId);
+            $this->addFieldToSelect($select, 'brand_external_id', $brandAttr);
         }
         foreach (Index::CUSTOM_ATTRIBUTES as $label) {
             $code = strtolower($label);
             $attr = $this->configProvider->getAttributeCode($code, $storeId);
             if ($attr) {
-                if (in_array("{$attr}_value", $flatColumns)) {
-                    $this->logger->debug("using {$attr}_value for {$code}");
-                    $select->columns(["{$code}s" => "{$attr}_value"]);
-                } else {
-                    if (in_array($attr, $flatColumns)) {
-                        $this->logger->debug("using {$attr} for {$code}");
-                        $select->columns(["{$code}s" => $attr]);
-                    }
-                }
+                $this->addFieldToJoin($select, $attr, $storeId);
+                $this->addFieldToSelect($select, "{$code}s", $attr);
+                $this->logger->debug("using $attr for $code");
             }
-        }
-
-        if ($this->configProvider->isFamiliesEnabled($storeId)) {
-            $familyFields = '';
-            $familyAttributes = $this->configProvider->getFamilyAttributesArray($storeId);
-            if ($familyAttributes) {
-                $familyFields = '';
-                foreach ($familyAttributes as $familyAttribute) {
-                    $familyFields .= 'p.'.$familyAttribute.',';
-                }
-            }
-
-            $select->columns(['family' => "GROUP_CONCAT(DISTINCT CONCAT_WS(',', {$familyFields}p.sku))"]);
         }
 
         /** Version */
@@ -536,17 +462,7 @@ class Flat implements IndexerActionInterface, MviewActionInterface
 
         //$this->_logger->debug($select->__toString());
 
-        try {
-            $rows = $select->query();
-        } catch (Exception $e) {
-            $this->logger->crit($e->getMessage()."\n".$e->getTraceAsString());
-            if (strpos($e->getMessage(), 'Column not found') !== false) {
-                $errorExplanation = 'The following "Column not found" error typically results from a product attribute missing from the flat product table. Please ensure that the attribute referenced in the error is set to Use In Product Listing = Yes, which should cause a reindex to add it to the product flat table that is being queried: ' . $e->getMessage();
-                throw new Exception($errorExplanation, 0, $e);
-            } else {
-                throw new Exception($e);
-            }
-        }
+        $rows = $select->query();
 
         while (($indexData = $rows->fetch()) !== false) {
             $this->logger->debug('Processing product '.$indexData['product_id']);
@@ -559,7 +475,9 @@ class Flat implements IndexerActionInterface, MviewActionInterface
                 }
             }
 
-            $indexData['status'] = $indexData[ProductFeed::INCLUDE_IN_FEED_FLAG] ? Status::STATUS_ENABLED
+            $indexData['status'] = ($indexData[ProductFeed::INCLUDE_IN_FEED_FLAG]
+                || $indexData[ProductFeed::INCLUDE_IN_FEED_FLAG] === null)
+                ? Status::STATUS_ENABLED
                 : Status::STATUS_DISABLED;
 
             if ($this->configProvider->isFamiliesEnabled($storeId)) {
@@ -572,7 +490,6 @@ class Flat implements IndexerActionInterface, MviewActionInterface
                 $this->logger->debug($indexData['family']);
             }
 
-            /** categories */
             if ($indexData['bv_category_external_id']) {
                 $indexData['category_external_id'] = $indexData['bv_category_external_id'];
             }
@@ -585,6 +502,9 @@ class Flat implements IndexerActionInterface, MviewActionInterface
                 $this->logger->debug('Not visible');
                 if (!empty($indexData['parent_url'])) {
                     $indexData['product_page_url'] = $indexData['parent_url'];
+                    if ($storeId == Store::DEFAULT_STORE_ID) {
+                        $indexData['url_store_id'] = $indexData['parent_url_store_id'];
+                    }
                     $this->logger->debug('Using Parent URL');
                 } else {
                     $this->logger->debug('Product marked disabled because no parent URL found');
@@ -609,10 +529,19 @@ class Flat implements IndexerActionInterface, MviewActionInterface
             $standardUrl = $this->getStandardUrl($indexData['product_id']);
 
             /** Add Store base to URLs */
-            $indexData['product_page_url'] = $this->getStoreUrl(
-                $store->getBaseUrl(),
-                $indexData['product_page_url'] == '' ? $standardUrl : $indexData['product_page_url']
-            );
+            if ($storeId == Store::DEFAULT_STORE_ID) {
+                $urlStore = $this->storeManager->getStore($indexData['url_store_id']);
+                $indexData['product_page_url'] = $this->getStoreUrl(
+                    $urlStore->getBaseUrl(),
+                    $indexData['product_page_url'] == '' ? $standardUrl : $indexData['product_page_url']
+                );
+            } else {
+                $indexData['product_page_url'] = $this->getStoreUrl(
+                    $store->getBaseUrl(),
+                    $indexData['product_page_url'] == '' ? $standardUrl : $indexData['product_page_url']
+                );
+            }
+
             $this->logger->debug("URL {$indexData['product_page_url']}");
             $indexData['image_url'] = $this->getImageUrl($store, $indexData);
 
@@ -640,41 +569,29 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      * @param $productIds
      * @param Store $store
      *
-     * @return $this
+     * @return void
      * @throws \Exception
      */
-    private function populateIndexLocaleData($productIds, $store)
+    private function populateIndexLocaleData($productIds, Store $store): void
     {
         $storeId = $store->getId();
         $locales = $this->configProvider->getLocales();
         if (isset($locales[$storeId])) {
-            /** Locale Data */
-            $localeColumns = [
-                'entity_id'   => 'entity_id',
-                'name'        => 'name',
-                'description' => 'short_description',
-                'image_url'   => 'small_image',
-            ];
-
             $res = $this->resourceConnection;
             $read = $res->getConnection('core_read');
 
             /** @var Store $localeStore */
             foreach ($locales[$storeId] as $locale => $localeStore) {
                 /** Core Data  */
-                $select = $this->getBaseSelect($read, $localeStore->getId(), $res);
+                $select = $this->getBaseSelect($read, $localeStore, $res);
 
                 $this->joinParent($select, $localeStore->getId(), $res);
                 $this->joinUrlRewrite($select, $localeStore->getId(), $res);
                 $this->filterByProducts($select, $productIds);
 
                 $columns = [];
-                foreach ($localeColumns as $dest => $source) {
-                    $columns["{$dest}"] = 'p.'.$source;
-                }
                 $columns["product_page_url"] = 'url.request_path';
                 $columns["parent_url"] = 'max(parent_url.request_path)';
-                $columns["parent_image"] = 'parent.small_image';
                 $select->columns($columns);
 
                 try {
@@ -683,21 +600,41 @@ class Flat implements IndexerActionInterface, MviewActionInterface
                         /** @var Index $productIndex */
 
                         foreach ($this->productIndexes as $productIndex) {
-                            if ($productIndex->getProductId() == $indexData['product_id']
-                                && $productIndex->getStoreId() == $storeId) {
+                            if ($productIndex->getData('product_id') == $indexData['product_id']
+                                && $productIndex->getData('store_id') == $storeId) {
                                 break;
                             }
                         }
 
+                        /** Use parent URLs/categories if appropriate */
+                        if ($indexData['visibility'] == Visibility::VISIBILITY_NOT_VISIBLE) {
+                            $this->logger->debug('Locale not visible');
+                            if (!empty($indexData['parent_url'])) {
+                                $indexData['product_page_url'] = $indexData['parent_url'];
+                                if ($storeId == Store::DEFAULT_STORE_ID && $localeStore->getId() == Store::DEFAULT_STORE_ID) {
+                                    $indexData['url_store_id'] = $indexData['parent_url_store_id'];
+                                }
+                                $this->logger->debug('Locale using Parent URL');
+                            }
+                        }
+
                         /** @var Store $localeStore */
-                        $urlPath = isset($indexData['product_page_url'])
-                            ? $indexData['product_page_url']
-                            : $this->getStandardUrl($indexData['product_id']);
-                        $localeUrl = $this->getStoreUrl(
-                            $localeStore->getBaseUrl(),
-                            $urlPath,
-                            $localeStore->getCode()
-                        );
+                        if ($storeId == Store::DEFAULT_STORE_ID && $localeStore->getId() == Store::DEFAULT_STORE_ID) {
+                            $urlStore = $this->storeManager->getStore($indexData['url_store_id']);
+                            $urlPath = $indexData['product_page_url'] ?? $this->getStandardUrl($indexData['product_id']);
+                            $localeUrl = $this->getStoreUrl(
+                                $urlStore->getBaseUrl(),
+                                $urlPath,
+                                $urlStore->getCode()
+                            );
+                        } else {
+                            $urlPath = $indexData['product_page_url'] ?? $this->getStandardUrl($indexData['product_id']);
+                            $localeUrl = $this->getStoreUrl(
+                                $localeStore->getBaseUrl(),
+                                $urlPath,
+                                $localeStore->getCode()
+                            );
+                        }
                         $indexData['product_page_url'] = $localeUrl;
 
                         if (isset($indexData['product_page_url'])) {
@@ -706,19 +643,6 @@ class Flat implements IndexerActionInterface, MviewActionInterface
                         }
 
                         $indexData['image_url'] = $this->getImageUrl($localeStore, $indexData);
-
-                        /** Use parent URLs/categories if appropriate */
-                        if ($indexData['visibility'] == Visibility::VISIBILITY_NOT_VISIBLE) {
-                            $this->logger->debug('Locale not visible');
-                            if (!empty($indexData['parent_url'])) {
-                                $indexData['product_page_url'] = $this->getStoreUrl(
-                                    $localeStore->getBaseUrl(),
-                                    $indexData['parent_url'],
-                                    $localeStore->getCode()
-                                );
-                                $this->logger->debug('Locale using Parent URL');
-                            }
-                        }
 
                         if (isset($indexData['description'])) {
                             $productIndex->addLocaleDescription([$locale => $indexData['description']]);
@@ -741,32 +665,36 @@ class Flat implements IndexerActionInterface, MviewActionInterface
                 }
             }
         }
-
-        return $this;
     }
 
     /**
-     * @param \Magento\Framework\DB\Adapter\AdapterInterface $read
-     * @param int                                            $storeId
+     * @param                                           $read
+     * @param                                           $store
+     * @param \Magento\Framework\App\ResourceConnection $res
      *
-     * @param \Magento\Framework\App\ResourceConnection      $res
-     *
-     * @return \Magento\Framework\DB\Select
+     * @return mixed
+     * @throws \Magento\Framework\Exception\LocalizedException
+     * @throws \Zend_Db_Select_Exception
      */
-    private function getBaseSelect($read, $storeId, ResourceConnection $res)
+    private function getBaseSelect($read, $store, ResourceConnection $res)
     {
-        $select = $read->select()
-            ->from(['p' => $res->getTableName('catalog_product_flat').'_'.$storeId], [
-                'name'            => 'p.name',
-                'product_type'    => 'p.type_id',
-                'product_id'      => 'p.entity_id',
-                'description'     => 'p.short_description',
-                'external_id'     => 'p.sku',
-                'image_url'       => 'p.small_image',
-                'visibility'      => 'p.visibility',
-                ProductFeed::INCLUDE_IN_FEED_FLAG => ProductFeed::INCLUDE_IN_FEED_FLAG,
-                'bv_category_id'  => 'p.bv_category_id',
-            ]);
+        $storeId = $store->getId();
+        $select = $read->select()->from(['p' => $res->getTableName('catalog_product_entity')], []);
+        $select->columns(['product_type' => 'p.type_id', 'product_id' => 'p.entity_id', 'external_id' => 'p.sku']);
+        $this->addFieldToJoin($select, 'name', $storeId);
+        $this->addFieldToJoin($select, 'short_description', $storeId);
+        $this->addFieldToJoin($select, 'small_image', $storeId);
+        $this->addFieldToJoin($select, 'visibility', $storeId);
+        $this->addFieldToJoin($select, ProductFeed::INCLUDE_IN_FEED_FLAG, $storeId);
+        $this->addFieldToJoin($select, 'status', $storeId);
+
+        $this->addFieldToSelect($select, 'name', 'name');
+        $this->addFieldToSelect($select, 'description', 'short_description');
+        $this->addFieldToSelect($select, 'image_url', 'small_image');
+        $this->addFieldToSelect($select, 'visibility', 'visibility');
+        $this->addFieldToSelect($select, ProductFeed::INCLUDE_IN_FEED_FLAG, ProductFeed::INCLUDE_IN_FEED_FLAG);
+
+        $this->filterByStore($select, $store);
 
         return $select;
     }
@@ -776,72 +704,104 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      * @param                                           $storeId
      * @param \Magento\Framework\App\ResourceConnection $res
      *
-     * @return mixed
+     * @return void
+     * @throws \Magento\Framework\Exception\LocalizedException
+     * @throws \Zend_Db_Select_Exception
      */
-    private function joinParent(Select $select, $storeId, ResourceConnection $res)
+    private function joinParent(Select $select, $storeId, ResourceConnection $res): void
     {
-        $familyFields = '';
-        $familyAttributes = $this->configProvider->getFamilyAttributesArray($storeId);
-        if ($familyAttributes) {
-            $familyFields = '';
-            foreach ($familyAttributes as $familyAttribute) {
-                $familyFields .= 'parent.'.$familyAttribute.',';
+        $select->joinLeft(
+            ['pp' => $res->getTableName('catalog_product_super_link')],
+            'pp.product_id = p.entity_id',
+            ''
+        )->joinLeft(
+            ['parent' => $res->getTableName('catalog_product_entity')],
+            'pp.parent_id = parent.'.$this->productIdField,
+            ''
+        );
+
+        $families = $parentFamilies = '';
+        if ($this->configProvider->isFamiliesEnabled($storeId)) {
+            $familyAttributes = $this->configProvider->getFamilyAttributesArray($storeId);
+            if ($familyAttributes) {
+                foreach ($familyAttributes as $familyAttribute) {
+                    $this->addFieldToJoin($select, $attributeCode = $familyAttribute, $storeId, 'parent');
+                    $attribute = $this->eavConfig->getAttribute('catalog_product', $attributeCode);
+                    $aliasTableName = 'parent'.'t'.$attribute->getId();
+                    $parentFamilies .= $this->resourceConnection->getConnection()->getIfNullSql(
+                        's' . $aliasTableName . '.value',
+                        $aliasTableName . '.value'
+                    ) . ',';
+
+                    $this->addFieldToJoin($select, $familyAttribute, $storeId);
+                    $aliasTableName = 'pt'.$attribute->getId();
+                    $families .= $this->resourceConnection->getConnection()->getIfNullSql(
+                        's' . $aliasTableName . '.value',
+                        $aliasTableName . '.value'
+                    ) . ',';
+                }
             }
         }
 
-        return $select
-            ->joinLeft(
-                ['pp' => $res->getTableName('catalog_product_super_link')],
-                'pp.product_id = p.entity_id',
-                ''
-            )
-            ->joinLeft(
-                ['parent' => $res->getTableName('catalog_product_flat').'_'.$storeId],
-                'pp.parent_id = parent.'.$this->productIdField,
-                [
-                    'parent_bvfamily' => "GROUP_CONCAT(DISTINCT CONCAT_WS(',', {$familyFields}parent.sku))",
-                    'parent_image' => 'small_image',
-                ]
-            );
+        $select->columns(['family' => "GROUP_CONCAT(DISTINCT CONCAT_WS(',', {$families}p.sku))"]);
+        $select->columns(['parent_bvfamily' => "GROUP_CONCAT(DISTINCT CONCAT_WS(',', {$parentFamilies}parent.sku))"]);
+
+        $this->addFieldToJoin($select, 'small_image', $storeId, 'parent');
+        $this->addFieldToSelect($select, 'parent_image', 'small_image', 'parent');
     }
 
     /**
      * @param \Magento\Framework\DB\Select              $select
      * @param                                           $storeId
-     *
      * @param \Magento\Framework\App\ResourceConnection $res
      *
-     * @return \Magento\Framework\DB\Select
+     * @return void
      */
-    private function joinUrlRewrite(Select $select, $storeId, ResourceConnection $res)
+    private function joinUrlRewrite(Select $select, $storeId, ResourceConnection $res): void
     {
         /** urls */
-        return $select
-            ->joinLeft(
-                ['url' => $res->getTableName('url_rewrite')],
-                "url.entity_type = 'product'
-                AND url.metadata IS NULL
-                AND url.entity_id = p.entity_id
-                AND url.store_id = {$storeId}",
-                ['product_page_url' => 'url.request_path']
-            )
-            ->joinLeft(
-                ['parent_url' => $res->getTableName('url_rewrite')],
-                "parent_url.entity_type = 'product'
-                AND parent_url.metadata IS NULL
-                AND parent_url.entity_id = parent.entity_id
-                AND parent_url.store_id = {$storeId}",
-                ['parent_url' => 'max(parent_url.request_path)']
-            );
+        if ($storeId == Store::DEFAULT_STORE_ID) {
+            $select
+                ->joinLeft(
+                    ['url' => new Zend_Db_Expr("(select min(store_id) as url_store_id, entity_id, request_path
+                    from `url_rewrite` where metadata is null and entity_type = 'product' group by entity_id)")],
+                    "url.entity_id = p.entity_id",
+                    ['product_page_url' => 'url.request_path', 'url_store_id' => 'url_store_id']
+                )
+                ->joinLeft(
+                    ['parent_url' => new Zend_Db_Expr("(select min(store_id) as parent_url_store_id, entity_id, request_path
+                    from `url_rewrite` where metadata is null and entity_type = 'product' group by entity_id)")],
+                    "parent_url.entity_id = parent.entity_id",
+                    ['parent_url' => 'parent_url.request_path', 'parent_url_store_id' => 'parent_url_store_id']
+                );
+        } else {
+            $select
+                ->joinLeft(
+                    ['url' => $res->getTableName('url_rewrite')],
+                    "url.entity_type = 'product'
+                    and url.metadata is null
+                    and url.entity_id = p.entity_id
+                    and url.store_id = $storeId",
+                    ['product_page_url' => 'url.request_path']
+                )
+                ->joinLeft(
+                    ['parent_url' => $res->getTableName('url_rewrite')],
+                    "parent_url.entity_type = 'product'
+                    and parent_url.metadata is null
+                    and parent_url.entity_id = parent.entity_id
+                    and parent_url.store_id = $storeId",
+                    ['parent_url' => 'max(parent_url.request_path)']
+                );
+        }
     }
 
     /**
      * @param \Magento\Framework\DB\Select $select
-     * @param array $productIds
+     * @param array                        $productIds
      */
-    private function filterByProducts($select, $productIds)
+    private function filterByProducts(Select $select, array $productIds)
     {
-        $select->where("p.entity_id IN(?)", $productIds)->group('p.entity_id');
+        $select->where("p.entity_id in (?)", $productIds)->group('p.entity_id');
     }
 
     /**
@@ -849,12 +809,10 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      *
      * @return string
      */
-    private function getStandardUrl($productId)
+    private function getStandardUrl($productId): string
     {
         /** Handle missing rewrites */
-        $standardUrl = 'catalog/product/view/id/'.$productId;
-
-        return $standardUrl;
+        return 'catalog/product/view/id/'.$productId;
     }
 
     /**
@@ -864,7 +822,7 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      *
      * @return string string
      */
-    private function getStoreUrl($storeUrl, $urlPath, $storeCode = null)
+    private function getStoreUrl(string $storeUrl, string $urlPath, $storeCode = null): string
     {
         $url = $storeUrl.$urlPath;
         if ($storeCode) {
@@ -877,7 +835,7 @@ class Flat implements IndexerActionInterface, MviewActionInterface
     /**
      * @param array $productIds
      */
-    private function _purgeUnversioned($productIds)
+    private function _purgeUnversioned(array $productIds)
     {
         /** Database Resources */
         $write = $this->resourceConnection->getConnection('core_write');
@@ -885,7 +843,7 @@ class Flat implements IndexerActionInterface, MviewActionInterface
         $indexTable = $this->resourceConnection->getTableName('bazaarvoice_index_product');
 
         $delete = $write->deleteFromSelect($write->select()->from($indexTable)->where('product_id IN(?)', $productIds)
-            ->where('store_id = 0'), $indexTable);
+            ->where('version_id = 0'), $indexTable);
         $write->query($delete);
     }
 
@@ -894,7 +852,6 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      */
     private function logStats()
     {
-        /** @var Select $select */
         $select = $this->resourceConnection->getConnection('core_read')
             ->select()
             ->from([
@@ -906,7 +863,7 @@ class Flat implements IndexerActionInterface, MviewActionInterface
         $result = $select->query();
 
         while ($row = $result->fetch()) {
-            if ($row['store_id'] == 0) {
+            if ($row['version_id'] == 0) {
                 $this->logger->debug("{$row['total']} Products left to Index");
             } else {
                 $this->logger->debug("{$row['total']} Products Indexed for Store {$row['store_id']}");
@@ -919,9 +876,9 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      *
      * @param array|\int[] $ids
      *
-     * @return mixed
+     * @return bool
      */
-    public function executeList(array $ids)
+    public function executeList(array $ids): bool
     {
         return true;
     }
@@ -931,9 +888,9 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      *
      * @param int $id
      *
-     * @return mixed
+     * @return bool
      */
-    public function executeRow($id)
+    public function executeRow($id): bool
     {
         return true;
     }
@@ -943,6 +900,7 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      * @param $indexData
      *
      * @return mixed
+     * @throws \Magento\Framework\Exception\LocalizedException
      */
     private function getImageUrl($store, $indexData)
     {
@@ -971,6 +929,7 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      * @param $store
      *
      * @return string|false
+     * @throws \Magento\Framework\Exception\LocalizedException
      */
     public function getPlaceholderUrl($store)
     {
@@ -1001,9 +960,8 @@ class Flat implements IndexerActionInterface, MviewActionInterface
      * @return bool
      * @throws \Zend_Db_Statement_Exception
      */
-    protected function hasBadScopeIndex()
+    protected function hasBadScopeIndex(): bool
     {
-        /** @var Select $select */
         $select = $this->resourceConnection->getConnection('core_read')
             ->select()
             ->from([
@@ -1014,7 +972,7 @@ class Flat implements IndexerActionInterface, MviewActionInterface
         $select->where("scope IS NOT NULL AND scope != '{$this->configProvider->getFeedGenerationScope()}'");
         $result = $select->query();
 
-        while ($row = $result->fetch()) {
+        if ($row = $result->fetch()) {
             return $row['total'] > 0;
         }
 
@@ -1024,7 +982,7 @@ class Flat implements IndexerActionInterface, MviewActionInterface
     /**
      * @return string
      */
-    protected function getProductIdFieldName()
+    protected function getProductIdFieldName(): string
     {
         $connection = $this->resourceConnection->getConnection('core_read');
         $table = $this->resourceConnection->getTableName('catalog_product_entity');
@@ -1056,5 +1014,103 @@ class Flat implements IndexerActionInterface, MviewActionInterface
                 $this->logger->crit($e->getMessage()."\n".$e->getTraceAsString());
             }
         }
+    }
+
+    /**
+     * @throws \Zend_Db_Select_Exception
+     * @throws \Magento\Framework\Exception\LocalizedException
+     */
+    protected function addFieldToJoin(
+        Select $select,
+        string $attributeCode,
+        $storeId,
+        string $mainTableAlias = 'p',
+        string $entityType = 'catalog_product'
+    ) {
+        $attribute = $this->eavConfig->getAttribute($entityType, $attributeCode);
+
+        $aliasTableName = $mainTableAlias.'t'.$attribute->getId();
+        $storeAliasTableName = 's' . $mainTableAlias.'t'.$attribute->getId();
+        $joinCondition = '%1$s.%4$s = %2$s.%4$s AND %2$s.attribute_id = %3$d AND %2$s.store_id = %5$d';
+        $tableName = "{$entityType}_entity_{$attribute->getBackendType()}";
+        $linkField = $this->getProductIdFieldName();
+        $defaultStoreId = Store::DEFAULT_STORE_ID;
+
+        if (!in_array($aliasTableName, array_keys($select->getPart('from')))) {
+            $select->joinLeft(
+                [$aliasTableName => $tableName],
+                sprintf($joinCondition, $mainTableAlias, $aliasTableName, $attribute->getId(), $linkField,
+                    $defaultStoreId),
+                []
+            );
+        }
+        if (!in_array($storeAliasTableName, array_keys($select->getPart('from')))) {
+            $select->joinLeft(
+                [$storeAliasTableName => $tableName],
+                sprintf($joinCondition, $mainTableAlias, 's' . $aliasTableName, $attribute->getId(), $linkField, $storeId),
+                []
+            );
+        }
+    }
+
+    /**
+     * @param \Magento\Framework\DB\Select $select
+     * @param string                       $fieldAlias
+     * @param string                       $attributeCode
+     * @param string                       $mainTableAlias
+     * @param string                       $entityType
+     *
+     * @return \Zend_Db_Expr
+     * @throws \Magento\Framework\Exception\LocalizedException
+     */
+    protected function addFieldToSelect(
+        Select $select,
+        string $fieldAlias,
+        string $attributeCode,
+        string $mainTableAlias = 'p',
+        string $entityType = 'catalog_product'
+    ): Zend_Db_Expr {
+        $attribute = $this->eavConfig->getAttribute($entityType, $attributeCode);
+        $aliasTableName = $mainTableAlias.'t'.$attribute->getId();
+        $columnValue = $this->resourceConnection->getConnection()->getIfNullSql(
+            's' . $aliasTableName . '.value',
+            $aliasTableName . '.value'
+        );
+
+        $select->columns([$fieldAlias => $columnValue]);
+
+        return $columnValue;
+    }
+
+    /**
+     * @param \Magento\Framework\DB\Select $select
+     * @param                              $store
+     * @param string                       $mainTableAlias
+     *
+     * @throws \Magento\Framework\Exception\LocalizedException
+     */
+    protected function filterByStore(
+        Select $select,
+        $store,
+        string $mainTableAlias = 'p'
+    ) {
+        if ($store->getId() != Store::DEFAULT_STORE_ID) {
+            $websiteId = $store->getWebsite()->getId();
+            $select->join(
+                ['cpw' => 'catalog_product_website'],
+                "p.entity_id = cpw.product_id and cpw.website_id = $websiteId",
+                []
+            );
+        }
+
+        $attribute = $this->eavConfig->getAttribute('catalog_product', 'status');
+        $aliasTableName = $mainTableAlias.'t'.$attribute->getId();
+        $columnValue = $this->resourceConnection->getConnection()->getIfNullSql(
+            's' . $aliasTableName . '.value',
+            $aliasTableName . '.value'
+        );
+
+        $select->columns(['status' => $columnValue]);
+        $select->where("$columnValue = ?", Status::STATUS_ENABLED);
     }
 }

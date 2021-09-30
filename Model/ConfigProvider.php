@@ -13,6 +13,7 @@ use Bazaarvoice\Connector\Model\Source\Environment;
 use Bazaarvoice\Connector\Model\Source\Scope;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\ObjectManager;
+use Magento\Framework\Encryption\EncryptorInterface;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Framework\Module\ModuleResource;
@@ -37,17 +38,24 @@ class ConfigProvider implements ConfigProviderInterface
      * @var \Magento\Store\Model\StoreManagerInterface
      */
     private $storeManager;
+    /**
+     * @var \Magento\Framework\Encryption\EncryptorInterface
+     */
+    private $encryptor;
 
     /**
      * @param \Magento\Framework\App\Config\ScopeConfigInterface $scopeConfig
      * @param \Magento\Store\Model\StoreManagerInterface         $storeManager
+     * @param \Magento\Framework\Encryption\EncryptorInterface   $encryptor
      */
     public function __construct(
         ScopeConfigInterface $scopeConfig,
-        StoreManagerInterface $storeManager
+        StoreManagerInterface $storeManager,
+        EncryptorInterface $encryptor
     ) {
         $this->scopeConfig = $scopeConfig;
         $this->storeManager = $storeManager;
+        $this->encryptor = $encryptor;
     }
 
     /**
@@ -188,7 +196,7 @@ class ConfigProvider implements ConfigProviderInterface
      */
     public function getSftpPassword($storeId = null, $scope = ScopeInterface::SCOPE_STORE)
     {
-        return $this->getConfig('feeds/sftp_password', $storeId, $scope);
+        return $this->encryptor->decrypt($this->getConfig('feeds/sftp_password', $storeId, $scope));
     }
 
     /**
@@ -410,10 +418,10 @@ class ConfigProvider implements ConfigProviderInterface
      *
      * @return string
      */
-    public function getSftpHost($storeId = null, $scope = ScopeInterface::SCOPE_STORE)
+    public function getSftpHost($storeId = null, $scope = ScopeInterface::SCOPE_STORE, $host = null)
     {
         $environment = $this->getEnvironment($storeId, $scope);
-        $hostSelection = trim($this->getConfig('feeds/sftp_host_name', $storeId, $scope));
+        $hostSelection = $host ? $host : trim($this->getConfig('feeds/sftp_host_name', $storeId, $scope));
 
         if ($environment == Environment::STAGING) {
             $sftpHost = $hostSelection.'-stg.bazaarvoice.com';
@@ -596,6 +604,14 @@ class ConfigProvider implements ConfigProviderInterface
     }
 
     /**
+     * @return string
+     */
+    public function getExtensionInjectionMessage()
+    {
+        return __('BV | Magento Extension %1', $this->getExtensionVersion());
+    }
+
+    /**
      * Get url to bv.js javascript API file
      *
      * C2013 staging call:
@@ -628,6 +644,80 @@ class ConfigProvider implements ConfigProviderInterface
     private function getConfig($configPath, $store = null, $scope = ScopeInterface::SCOPE_STORE)
     {
         return $this->getDefaultConfig('bazaarvoice/'.$configPath, $store, $scope);
+    }
+
+    /**
+     * @param string[] $configPaths
+     * @param string $scope
+     *
+     * @return mixed
+     */
+    private function areAllConfigsEnabledInAnyScopeId(array $configPaths, $scope)
+    {
+        /** @var \Magento\Store\Model\Website $website */
+        /** @var \Magento\Store\Model\Group $group */
+        /** @var \Magento\Store\Model\Store $store */
+
+        switch ($scope) {
+            case ScopeConfigInterface::SCOPE_TYPE_DEFAULT:
+                $allConfigPathsEnabledInScope = true;
+                foreach ($configPaths as $configPath) {
+                    if (!$this->getConfig($configPath, 0)) {
+                        $allConfigPathsEnabledInScope = false;
+                    }
+                }
+
+                if ($allConfigPathsEnabledInScope) {
+                    return true;
+                }
+                break;
+            case ScopeInterface::SCOPE_WEBSITE:
+                $websites = $this->storeManager->getWebsites();
+                foreach ($websites as $website) {
+                    $allConfigPathsEnabledInScope = true;
+                    foreach ($configPaths as $configPath) {
+                        if (!$this->getConfig($configPath, $website->getId(), ScopeInterface::SCOPE_WEBSITE)) {
+                            $allConfigPathsEnabledInScope = false;
+                        }
+                    }
+
+                    if ($allConfigPathsEnabledInScope) {
+                        return true;
+                    }
+                }
+                break;
+            case ScopeInterface::SCOPE_GROUP:
+                $groups = $this->storeManager->getGroups();
+                foreach ($groups as $group) {
+                    $allConfigPathsEnabledInScope = true;
+                    foreach ($configPaths as $configPath) {
+                        if (!$this->getConfig($configPath, $group->getId(), ScopeInterface::SCOPE_GROUP)) {
+                            $allConfigPathsEnabledInScope = false;
+                        }
+                    }
+
+                    if ($allConfigPathsEnabledInScope) {
+                        return true;
+                    }
+                }
+                break;
+            case ScopeInterface::SCOPE_STORE:
+                $stores = $this->storeManager->getStores();
+                foreach ($stores as $store) {
+                    $allConfigPathsEnabledInScope = true;
+                    foreach ($configPaths as $configPath) {
+                        if (!$this->getConfig($configPath, $store->getId(), ScopeInterface::SCOPE_STORE)) {
+                            $allConfigPathsEnabledInScope = false;
+                        }
+                    }
+
+                    if ($allConfigPathsEnabledInScope) {
+                        return true;
+                    }
+                }
+        }
+
+        return false;
     }
 
     /**
@@ -688,6 +778,11 @@ class ConfigProvider implements ConfigProviderInterface
                 break;
             case Scope::SCOPE_GLOBAL:
                 $stores = $this->storeManager->getStores();
+                if (!$this->getDefaultConfig('catalog/frontend/flat_catalog_product')
+                    && !$this->getDefaultConfig('catalog/frontend/flat_catalog_category')
+                ) {
+                    $defaultStore = $this->storeManager->getStore(0);
+                }
                 ksort($stores);
                 /** @var Store $store */
                 $globalLocales = [];
@@ -731,5 +826,35 @@ class ConfigProvider implements ConfigProviderInterface
         }
 
         return $locales;
+    }
+
+    /**
+     * @return bool|null
+     */
+    public function canSendProductFeedInAnyScope()
+    {
+        $configScope = $this->getConfigScope($this->getFeedGenerationScope());
+
+        return $this->areAllConfigsEnabledInAnyScopeId(['general/enable_bv', 'feeds/enable_product_feed'], $configScope);
+    }
+
+    /**
+     * @param string $feedGenerationScope
+     *
+     * @return string
+     */
+    private function getConfigScope($feedGenerationScope)
+    {
+        switch ($feedGenerationScope) {
+            case Scope::WEBSITE:
+                return ScopeInterface::SCOPE_WEBSITE;
+            case Scope::SCOPE_GLOBAL:
+                return ScopeConfigInterface::SCOPE_TYPE_DEFAULT;
+            case Scope::STORE_GROUP:
+                return ScopeInterface::SCOPE_GROUP;
+            case Scope::STORE_VIEW:
+            default:
+                return ScopeInterface::SCOPE_STORE;
+        }
     }
 }

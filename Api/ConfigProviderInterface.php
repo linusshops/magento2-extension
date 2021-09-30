@@ -324,6 +324,11 @@ interface ConfigProviderInterface
     public function getExtensionVersion();
 
     /**
+     * @return string
+     */
+    public function getExtensionInjectionMessage();
+
+    /**
      * @return array
      * @throws \Exception
      */
@@ -371,4 +376,9 @@ interface ConfigProviderInterface
      * @return string|null
      */
     public function getPrefix($storeId = null, $scope = ScopeInterface::SCOPE_STORE);
+
+    /**
+     * @return bool|null
+     */
+    public function canSendProductFeedInAnyScope();
 }
