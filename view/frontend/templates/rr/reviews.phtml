@@ -1,32 +1,21 @@
-<?php /**
- * StoreFront Bazaarvoice Extension for Magento
- *
- * PHP Version 5
- *
- * LICENSE: This source file is subject to commercial source code license
- * of StoreFront Consulting, Inc.
- *
- * @category  SFC
- * @package   Bazaarvoice_Ext
- * @author    Dennis Rogers <dennis@storefrontconsulting.com>
- * @copyright 2016 StoreFront Consulting, Inc
- * @license   http://www.storefrontconsulting.com/media/downloads/ExtensionLicense.pdf StoreFront Consulting Commercial License
- * @link      http://www.StoreFrontConsulting.com/bazaarvoice-extension/
- */ ?>
-<?php /** @var \Bazaarvoice\Connector\Block\Reviews $this */ ?>
-<?php if ($this->canShow('rr')): ?>
 <?php
-$doShowContentJs = $this->getConfig('rr/do_show_content_js');
-$seoContent = $this->getSEOContent();
+/**
+ * Copyright © Bazaarvoice, Inc. All rights reserved.
+ * See LICENSE.md for license details.
+ */
 ?>
-<div id="BVRRContainer">
-    <?php echo $seoContent ?>
-</div>
-<script type="text/javascript">
-    $BV.ui( 'rr', 'show_reviews', {
-        doShowContent : function () {
-            <?php echo $doShowContentJs ?>
-        }
-    });
-</script>
+
+<?php /** @var Magento\Framework\View\Element\Template $block */ ?>
+<?php /** @var Bazaarvoice\Connector\ViewModel\Reviews $viewModel */ ?>
+<?php $viewModel = $block->getViewModel(); ?>
+
+<?php if ($viewModel->canShow()) : ?>
+    <!-- <?= $viewModel->getExtensionInjectionMessage(); ?> -->
+    <?php $seoContent = $viewModel->getSeoContent(); ?>
+    <div data-bv-show="reviews" data-bv-product-id="<?= $viewModel->getProductSku() ?>">
+        <?= $seoContent ?>
+    </div>
 <?php endif;
+
+
+

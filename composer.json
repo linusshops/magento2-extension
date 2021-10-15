@@ -2,14 +2,10 @@
   "name": "bazaarvoice/bazaarvoice-magento2-ext",
   "description": "Bazaarvoice Magento 2 Integration Extension",
   "type": "magento2-module",
-  "license": [ "MIT" ],
-  "authors": [
-    {
-      "name": "Dennis Rogers",
-      "email": "dennis@storefrontconsulting.com"
-    }
+  "license": [
+    "MIT"
   ],
-  "version": "7.0.13",
+  "version": "9.0.0",
   "autoload": {
     "files": [
       "registration.php"
@@ -17,5 +13,8 @@
     "psr-4": {
       "Bazaarvoice\\Connector\\": ""
     }
+  },
+  "require": {
+    "php": "~7.0"
   }
 }

@@ -1,95 +1,66 @@
 <?php
 /**
- * StoreFront Bazaarvoice Extension for Magento
- *
- * PHP Version 5
- *
- * LICENSE: This source file is subject to commercial source code license
- * of StoreFront Consulting, Inc.
- *
- * @category  SFC
- * @package   Bazaarvoice_Ext
- * @author    Dennis Rogers <dennis@storefrontconsulting.com>
- * @copyright 2016 StoreFront Consulting, Inc
- * @license   http://www.storefrontconsulting.com/media/downloads/ExtensionLicense.pdf StoreFront Consulting Commercial License
- * @link      http://www.StoreFrontConsulting.com/bazaarvoice-extension/
+ * Copyright © Bazaarvoice, Inc. All rights reserved.
+ * See LICENSE.md for license details.
  */
+
+declare(strict_types=1);
 
 namespace Bazaarvoice\Connector\Model\Source;
 
-use \Magento\Framework\ObjectManagerInterface;
-use Magento\Store\Model\Store;
+use Magento\Catalog\Model\ResourceModel\Attribute;
+use Magento\Catalog\Model\ResourceModel\Product\Attribute\Collection as AttributeCollection;
+use Magento\Catalog\Model\ResourceModel\Product\Attribute\CollectionFactory;
+use Magento\Framework\Data\OptionSourceInterface;
 
-class ProductAttribute
+/**
+ * Class ProductAttribute
+ *
+ * @package Bazaarvoice\Connector\Model\Source
+ */
+class ProductAttribute implements OptionSourceInterface
 {
-    /** @var ObjectManagerInterface $_objectManager */
-    protected $_objectManager;
+    /**
+     * @var CollectionFactory
+     */
+    protected $productAttributeCollectionFactory;
 
     /**
      * ProductAttribute constructor.
-     * @param ObjectManagerInterface $interface
+     *
+     * @param CollectionFactory $attributeCollectionFactory
      */
-    public function __construct(
-        ObjectManagerInterface $interface
-    )
-    {
-        $this->_objectManager = $interface;
+    public function __construct(CollectionFactory $attributeCollectionFactory) {
+        $this->productAttributeCollectionFactory = $attributeCollectionFactory;
     }
 
     /**
+     * @param bool $isMultiselect
+     *
      * @return array
      */
-    public function toOptionArray()
+    public function toOptionArray($isMultiselect = false)
     {
-        /** @var \Magento\Catalog\Model\ResourceModel\Product\Attribute\CollectionFactory $factory */
-        $factory = $this->_objectManager->get('\Magento\Catalog\Model\ResourceModel\Product\Attribute\CollectionFactory');
-
-        /** @var \Magento\Catalog\Model\ResourceModel\Product\Attribute\Collection $attributes */
-        $attributes = $factory->create();
-
-
-        $stores = $this->_objectManager->get('Magento\Store\Model\StoreManagerInterface')->getStores();
-        $defaultStore = null;
-        /** @var Store $store */
-        foreach ($stores as $store) {
-            if (isset($defaultStore) == false) {
-                $defaultStore = $store;
-                break;
-            }
+        $attributeOptions = [];
+        if (!$isMultiselect) {
+            $attributeOptions[] = [
+                'label' => __('-- Please Select --'),
+                'value' => ''
+            ];
         }
 
-        $attributeOptions = array(array(
-            'label' => __('-- Please Select --'),
-            'value' => ''
-        ));
+        /** @var AttributeCollection $attributes */
+        $attributes = $this->productAttributeCollectionFactory->create();
+        $attributes->addFieldToFilter('used_in_product_listing', '1');
 
-        /** @var \Magento\Framework\DB\Adapter\AdapterInterface $read */
-        $read = $attributes->getConnection();
-        try {
-            $columnResults = $read->query('DESCRIBE `' . $read->getTableName('catalog_product_flat') . '_' . $defaultStore->getId() . '`;');
-            $flatColumns = array();
-            while ($row = $columnResults->fetch()) {
-                $flatColumns[] = $row['Field'];
-            }
-        } Catch (\Exception $e) {
-            $flatColumns = array();
-        }
-
-        /** @var \Magento\Catalog\Model\ResourceModel\Attribute $attribute */
+        /** @var Attribute $attribute */
         foreach ($attributes as $attribute) {
-            if (
-                $attribute->getIsUserDefined() == 0
-                || $attribute->getUsedInProductListing() == 0
-                || in_array($attribute->getAttributeCode(), $flatColumns) == false
-            )
-                continue;
-            $attributeOptions[] = array(
+            $attributeOptions[] = [
                 'label' => $attribute->getFrontendLabel(),
-                'value' => $attribute->getAttributeCode()
-            );
+                'value' => $attribute->getAttributeCode(),
+            ];
         }
 
         return $attributeOptions;
     }
-
 }

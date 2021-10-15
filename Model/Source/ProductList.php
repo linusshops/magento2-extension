@@ -1,62 +1,68 @@
 <?php
 /**
- * StoreFront Bazaarvoice Extension for Magento
- *
- * PHP Version 5
- *
- * LICENSE: This source file is subject to commercial source code license
- * of StoreFront Consulting, Inc.
- *
- * @category  SFC
- * @package   Bazaarvoice_Ext
- * @author    Dennis Rogers <dennis@storefrontconsulting.com>
- * @copyright 2016 StoreFront Consulting, Inc
- * @license   http://www.storefrontconsulting.com/media/downloads/ExtensionLicense.pdf StoreFront Consulting Commercial License
- * @link      http://www.StoreFrontConsulting.com/bazaarvoice-extension/
+ * Copyright © Bazaarvoice, Inc. All rights reserved.
+ * See LICENSE.md for license details.
  */
+
+declare(strict_types=1);
 
 namespace Bazaarvoice\Connector\Model\Source;
 
-class ProductList
+use Magento\Framework\Data\OptionSourceInterface;
+
+/**
+ * Class ProductList
+ *
+ * @package Bazaarvoice\Connector\Model\Source
+ */
+class ProductList implements OptionSourceInterface
 {
     const CATEGORY = 'category';
     const SEARCH = 'search';
     const UPSELL = 'upsell';
     const RELATED = 'related';
     const CROSSSELL = 'crosssell';
+    const CATALOG_PRODUCTS_LIST_WIDGET = 'widget';
+    const CATALOG_NEW_PRODUCTS_LIST_WIDGET = 'new_products_list_widget';
+    /**
+     * @deprecated Use CATALOG_PRODUCTS_LIST_WIDGET
+     */
     const WIDGET = 'widget';
 
+    /**
+     * @return array
+     */
     public function toOptionArray()
     {
-        return array(
-            array(
+        return [
+            [
                 'value' => '',
-                'label' => __('None')
-            ),
-            array(
+                'label' => __('None'),
+            ],
+            [
                 'value' => self::CATEGORY,
-                'label' => __('Category Pages')
-            ),
-            array(
-                'value' => self::SEARCH,
-                'label' => __('Search Result Pages')
-            ),
-            array(
+                'label' => __('Category and Search Result Pages'),
+            ],
+            [
                 'value' => self::UPSELL,
-                'label' => __('Upsells on Product Pages')
-            ),
-            array(
+                'label' => __('Up-Sell Products on Product Pages'),
+            ],
+            [
                 'value' => self::RELATED,
-                'label' => __('Related Products on Product Pages')
-            ),
-            array(
+                'label' => __('Related Products on Product Pages'),
+            ],
+            [
                 'value' => self::CROSSSELL,
-                'label' => __('Cross Sells on Cart Page')
-            ),
-	        array(
-		        'value' => self::WIDGET,
-		        'label' => __('Product List Widget')
-	        ),
-        );
+                'label' => __('Cross-Sell Products on Cart Page'),
+            ],
+            [
+                'value' => self::CATALOG_PRODUCTS_LIST_WIDGET,
+                'label' => __('Product List Widget'),
+            ],
+            [
+                'value' => self::CATALOG_NEW_PRODUCTS_LIST_WIDGET,
+                'label' => __('Product New List Widget'),
+            ],
+        ];
     }
 }

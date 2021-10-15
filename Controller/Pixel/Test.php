@@ -1,48 +1,34 @@
 <?php
 /**
- * StoreFront Bazaarvoice Extension for Magento
- *
- * PHP Version 5
- *
- * LICENSE: This source file is subject to commercial source code license
- * of StoreFront Consulting, Inc.
- *
- * @category  SFC
- * @package   Bazaarvoice_Ext
- * @author    Dennis Rogers <dennis@storefrontconsulting.com>
- * @copyright 2016 StoreFront Consulting, Inc
- * @license   http://www.storefrontconsulting.com/media/downloads/ExtensionLicense.pdf StoreFront Consulting Commercial License
- * @link      http://www.StoreFrontConsulting.com/bazaarvoice-extension/
+ * Copyright © Bazaarvoice, Inc. All rights reserved.
+ * See LICENSE.md for license details.
  */
+
+declare(strict_types=1);
 
 namespace Bazaarvoice\Connector\Controller\Pixel;
 
-use Magento\Framework\App\Action\Action;
-use Magento\Framework\App\Action\Context;
+use Magento\Checkout\Controller\Onepage\Success;
 
-class Test extends Action
+/**
+ * Class Test
+ *
+ * @package Bazaarvoice\Connector\Controller\Pixel
+ */
+class Test extends Success
 {
-    protected $_checkoutSession;
-
     /**
-     * Test constructor.
-     * @param \Magento\Checkout\Model\Session $checkoutSession
-     * @param Context $context
+     * @return \Magento\Framework\App\ResponseInterface|\Magento\Framework\Controller\ResultInterface|void
      */
-    public function __construct(
-        \Magento\Checkout\Model\Session $checkoutSession,
-        Context $context
-    ) {
-        $this->_checkoutSession = $checkoutSession;
-        parent::__construct($context);
-    }
-
-
-
     public function execute()
     {
-        $this->_checkoutSession->setLastRealOrderId(12);
-        $this->_view->loadLayout();
-        $this->_view->renderLayout();
+        $orderIncrementId = $this->getRequest()->getParam('order_increment_id');
+        $orderId = $this->getRequest()->getParam('order_id');
+        $session = $this->getOnepage()->getCheckout();
+        $session->setLastRealOrderId($orderIncrementId);
+        $session->setLastOrderId($orderId);
+        $session->setLastSuccessQuoteId('dummy_value');
+        $session->setLastQuoteId('dummy_value');
+        return parent::execute();
     }
 }

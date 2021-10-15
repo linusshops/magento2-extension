@@ -1,46 +1,49 @@
 <?php
 /**
- * StoreFront Bazaarvoice Extension for Magento
- *
- * PHP Version 5
- *
- * LICENSE: This source file is subject to commercial source code license
- * of StoreFront Consulting, Inc.
- *
- * @category  SFC
- * @package   Bazaarvoice_Ext
- * @author    Dennis Rogers <dennis@storefrontconsulting.com>
- * @copyright 2016 StoreFront Consulting, Inc
- * @license   http://www.storefrontconsulting.com/media/downloads/ExtensionLicense.pdf StoreFront Consulting Commercial License
- * @link      http://www.StoreFrontConsulting.com/bazaarvoice-extension/
+ * Copyright © Bazaarvoice, Inc. All rights reserved.
+ * See LICENSE.md for license details.
  */
+
+declare(strict_types=1);
+
 namespace Bazaarvoice\Connector\Controller\Adminhtml\Bvfeed;
 
-use Bazaarvoice\Connector\Model\Indexer\Flat;
+use Bazaarvoice\Connector\Model\Indexer\Indexer;
+use Exception;
+use Magento\Backend\App\Action;
 use Magento\Backend\App\Action\Context;
 
-class Rebuildproduct extends \Magento\Backend\App\Action
+class Rebuildproduct extends Action
 {
-
-    /** @var  Flat $_indexer */
-    protected $_indexer;
+    /**
+     * @var \Bazaarvoice\Connector\Model\Indexer\Indexer
+     */
+    protected $indexer;
 
     /**
      * Runproduct constructor.
-     * @param Context $context
-     * @param Flat $indexer
+     *
+     * @param Context                                      $context
+     * @param \Bazaarvoice\Connector\Model\Indexer\Indexer $indexer
      */
-    public function __construct(Context $context, Flat $indexer)
+    public function __construct(Context $context, Indexer $indexer)
     {
         parent::__construct($context);
-        $this->_indexer = $indexer;
+        $this->indexer = $indexer;
     }
 
+    /**
+     * @return void
+     * @throws \Exception
+     */
     public function execute()
     {
-        $result = $this->_indexer->executeFull();
-        if ($result)
-            $this->messageManager->addSuccessMessage(__('Product Feed Index has been flagged for rebuild.'));
+        try {
+            $this->indexer->executeFull();
+            $this->messageManager->addSuccessMessage(__('Product Feed Index is being rebuilt.'));
+        } catch (Exception $e) {
+            $this->messageManager->addErrorMessage($e->__toString());
+        }
 
         $this->_redirect('adminhtml/bvindex/index');
     }
