@@ -11,6 +11,7 @@ namespace Bazaarvoice\Connector\Logger;
 use Bazaarvoice\Connector\Api\ConfigProviderInterface;
 use Exception;
 use Magento\Framework\App\State;
+use Monolog\DateTimeImmutable;
 
 /**
  * Class Logger
@@ -58,25 +59,22 @@ class Logger extends \Monolog\Logger
      * @param string|array $message
      * @param array        $context
      *
-     * @return bool
+     * @return bool 
      */
-    public function debug($message, array $context = [])
+    public function debug($message, array $context = []): void
     {
         if ($this->configProvider->isDebugEnabled()) {
-            return $this->addRecord(static::DEBUG, $message, $context);
+            $this->addRecord(static::DEBUG, $message, $context);
         }
-
-        return true;
     }
 
     /**
      * @param int    $level
      * @param string $message
      * @param array  $context
-     *
      * @return bool
      */
-    public function addRecord($level, $message, array $context = [])
+    public function addRecord(int $level, string $message, array $context = [], DateTimeImmutable $datetime = null): bool
     {
         if (is_array($message)) {
             $message = print_r($message, $return = true);
