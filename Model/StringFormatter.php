@@ -46,10 +46,14 @@ class StringFormatter implements StringFormatterInterface
      */
     public function replaceIllegalCharacters($rawId)
     {
-        /** Customizations go here */
-//        $rawProductId = preg_replace_callback('/\./s', function ($match) {
-//            return "_bv".ord($match[0])."_";
-//        }, $rawId);
+        /**
+         * Customizations go here
+         */
+//        $rawProductId = preg_replace_callback(
+//            '/\./s', function ($match) {
+//                return "_bv".ord($match[0])."_";
+//            }, $rawId
+//        );
         $rawProductId = $rawId;
         /** No further customizations after this */
 
@@ -58,9 +62,11 @@ class StringFormatter implements StringFormatterInterface
          * Example rawId = qwerty$%@#asdf
          * Example encoded = qwerty_bv36__bv37__bv64__bv35_asdf
          */
-        return preg_replace_callback('/[^\w\d\*\-\._]/s', function ($match) {
-            return "_bv".ord($match[0])."_";
-        }, $rawProductId);
+        return preg_replace_callback(
+            '/[^\w\d\*\-\._]/s', function ($match) {
+                return "_bv".ord($match[0])."_";
+            }, $rawProductId
+        );
     }
 
     /**
@@ -170,8 +176,10 @@ class StringFormatter implements StringFormatterInterface
      */
     public function stripEmptyValues($data)
     {
-        return array_filter($data, function ($a) {
-            return !empty($a) || $a === false; //send false values
-        });
+        return array_filter(
+            $data, function ($a) {
+                return !empty($a) || $a === false; //send false values
+            }
+        );
     }
 }
