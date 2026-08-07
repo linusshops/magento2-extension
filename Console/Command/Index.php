@@ -21,6 +21,12 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 class Index extends Command
 {
+
+    /**
+     * @var mixed
+     */
+    protected $scopeConfig;
+
     /**
      * @var \Bazaarvoice\Connector\Model\Indexer\Indexer
      */
