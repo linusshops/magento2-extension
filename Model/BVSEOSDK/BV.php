@@ -56,6 +56,42 @@ class BV
 {
 
     /**
+     * @var mixed
+     */
+    protected $SEO;
+
+    /**
+     * @var mixed
+     */
+    protected $config;
+
+    /**
+     * @var mixed
+     */
+    protected $questions;
+
+    /**
+     * @var mixed
+     */
+    protected $reviews;
+
+    /**
+     * @var mixed
+     */
+    protected $sellerratings;
+
+    /**
+     * @var mixed
+     */
+    protected $spotlights;
+
+    /**
+     * @var mixed
+     */
+    protected $stories;
+
+
+    /**
      * BV Class Constructor
      *
      * The constructor takes in all the arguments via a single array.

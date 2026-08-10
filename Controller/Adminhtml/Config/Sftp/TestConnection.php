@@ -15,6 +15,32 @@ use Magento\Store\Model\ScopeInterface;
 
 class TestConnection extends Action
 {
+
+    /**
+     * @var mixed
+     */
+    protected $configProvider;
+
+    /**
+     * @var mixed
+     */
+    protected $resultJsonFactory;
+
+    /**
+     * @var mixed
+     */
+    protected $sftp;
+
+    /**
+     * @var mixed
+     */
+    protected $storeManager;
+
+    /**
+     * @var mixed
+     */
+    protected $tagFilter;
+
     public function __construct(
         Context $context,
         \Bazaarvoice\Connector\Model\Filesystem\Io\Sftp $sftp,

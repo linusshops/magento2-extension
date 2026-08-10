@@ -55,28 +55,42 @@ class Logger extends \Monolog\Logger
     }
 
     /**
-     * @param string|array $message
-     * @param array        $context
+     * Gate debug output on the module's own debug flag.
      *
-     * @return bool
+     * The parameter is left untyped deliberately. Monolog 3 narrows this to
+     * `string|\Stringable`, but callers in this module pass arrays, and PHP
+     * permits a subclass to WIDEN a parameter type. Narrowing here would turn
+     * existing array call sites into TypeErrors. The `void` return is required:
+     * Monolog 3 declares it, and a subclass must match.
+     *
+     * @param string|array|\Stringable $message
+     * @param array                    $context
+     *
+     * @return void
      */
-    public function debug($message, array $context = [])
+    public function debug($message, array $context = []): void
     {
         if ($this->configProvider->isDebugEnabled()) {
-            return $this->addRecord(static::DEBUG, $message, $context);
+            $this->addRecord(static::DEBUG, $message, $context);
         }
-
-        return true;
     }
 
     /**
-     * @param int    $level
-     * @param string $message
-     * @param array  $context
+     * Stringify array messages and echo to stdout under CLI or adminhtml.
+     *
+     * Signature tracks Monolog 3: the fourth `$datetime` argument must be
+     * accepted and forwarded, and the return type must be `bool`. Parameters
+     * are widened rather than narrowed so array messages still reach the
+     * `print_r` branch below instead of failing a type check on entry.
+     *
+     * @param int|\Monolog\Level                              $level
+     * @param string|array|\Stringable                        $message
+     * @param array                                           $context
+     * @param \Monolog\JsonSerializableDateTimeImmutable|null $datetime
      *
      * @return bool
      */
-    public function addRecord($level, $message, array $context = [])
+    public function addRecord($level, $message, array $context = [], $datetime = null): bool
     {
         if (is_array($message)) {
             $message = print_r($message, $return = true);
@@ -86,6 +100,6 @@ class Logger extends \Monolog\Logger
             print_r($message."\n");
         }
 
-        return parent::addRecord($level, $message, $context);
+        return parent::addRecord($level, (string)$message, $context, $datetime);
     }
 }
