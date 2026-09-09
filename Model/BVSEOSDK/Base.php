@@ -20,24 +20,43 @@ class Base
 {
 
     /**
+     * These five replace properties that PHP created dynamically before 8.2.
+     * A dynamic property is created public, so public is the visibility that
+     * preserves the behaviour this code had on PHP 7.4. BVFooter reads
+     * $base->config, $base->bv_config, $base->seo_url and $base->start_time
+     * from outside the class, and SeoContent reads $bv->reviews, so narrowing
+     * any of them to protected turns a working page into an uncatchable
+     * \Error. Upstream 9.1.9 declares the same set public for the same reason.
+     *
+     * $bv_config was missing altogether, so writing it in the constructor
+     * raised the PHP 8.2 dynamic-property deprecation, which Magento's
+     * ErrorHandler escalates into a thrown Exception. The constructor never
+     * completed, SeoContent caught it, and the SEO block rendered empty on
+     * every product page at HTTP 200.
+     *
      * @var mixed
      */
-    protected $config;
+    public $bv_config;
 
     /**
      * @var mixed
      */
-    protected $response_time;
+    public $config;
 
     /**
      * @var mixed
      */
-    protected $seo_url;
+    public $response_time;
 
     /**
      * @var mixed
      */
-    protected $start_time;
+    public $seo_url;
+
+    /**
+     * @var mixed
+     */
+    public $start_time;
 
     private $msg = '';
 
