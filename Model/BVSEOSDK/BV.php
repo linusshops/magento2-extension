@@ -56,39 +56,45 @@ class BV
 {
 
     /**
+     * These seven replace properties that PHP created dynamically before 8.2,
+     * and a dynamic property is created public. SeoContent reads
+     * $bv->reviews from outside the class, so protected here throws an
+     * uncatchable \Error the moment the constructor succeeds. Upstream 9.1.9
+     * declares the same set public.
+     *
      * @var mixed
      */
-    protected $SEO;
+    public $SEO;
 
     /**
      * @var mixed
      */
-    protected $config;
+    public $config;
 
     /**
      * @var mixed
      */
-    protected $questions;
+    public $questions;
 
     /**
      * @var mixed
      */
-    protected $reviews;
+    public $reviews;
 
     /**
      * @var mixed
      */
-    protected $sellerratings;
+    public $sellerratings;
 
     /**
      * @var mixed
      */
-    protected $spotlights;
+    public $spotlights;
 
     /**
      * @var mixed
      */
-    protected $stories;
+    public $stories;
 
 
     /**
